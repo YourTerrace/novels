@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Novels</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600&display=swap">
+<link rel="stylesheet" href="assets/common.css">
+<style>
+  .narrow { max-width: 420px; margin: 12vh auto 0; }
+  .shelf-item { width: 100%; text-align: left; background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+  .shelf-item:hover .title-line { color: var(--accent); }
+  .reader-bar { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .article h1 { font-size: 1.6rem; margin: 32px 0 4px; }
+  .article .date { margin-bottom: 32px; }
+  .body { font-family: var(--serif); font-size: 1.05rem; line-height: 2; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .body figure { margin: 24px 0; text-align: center; white-space: normal; }
+  .body img { max-width: 100%; height: auto; border-radius: 4px; }
+  .article.vertical .body { writing-mode: vertical-rl; height: 75vh; height: 75svh; overflow-x: auto; overflow-y: hidden; line-height: 1.9; }
+  .article.vertical .body figure { margin: 0 24px; }
+  .article.vertical .body img { max-width: none; max-height: 60vh; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <section id="nameView" class="narrow hidden">
+    <form id="nameForm" class="card">
+      <label for="nameInput" style="margin-top:0">お名前</label>
+      <input id="nameInput" type="text" autocomplete="username" required>
+      <div class="row" style="margin-top:16px"><button class="btn" type="submit">次へ</button></div>
+    </form>
+  </section>
+
+  <section id="passView" class="narrow hidden">
+    <form id="passForm" class="card">
+      <h1 style="margin:0 0 4px;font-size:1.3rem"><span id="who"></span> さん</h1>
+      <label for="pass">パスワード</label>
+      <input id="pass" type="password" autocomplete="current-password" required>
+      <div class="row" style="margin-top:16px"><button id="unlock" class="btn" type="submit">復号する</button></div>
+      <p id="passMsg" class="msg"></p>
+    </form>
+    <p class="muted" style="text-align:center"><a href="#" id="changeName">名前を入力し直す</a></p>
+  </section>
+
+  <section id="listView" class="hidden">
+    <h1 style="font-size:1.4rem"><span id="who2"></span> さんの本棚</h1>
+    <ul id="shelf" class="list card"></ul>
+  </section>
+
+  <section id="readView" class="hidden">
+    <div class="reader-bar">
+      <button id="back" class="btn ghost small" type="button">← 本棚へ</button>
+      <button id="toggleVertical" class="btn ghost small" type="button">縦書き</button>
+    </div>
+    <article id="article" class="article">
+      <h1 id="aTitle"></h1>
+      <div id="aDate" class="muted date"></div>
+      <div id="aBody" class="body"></div>
+    </article>
+    <p id="readMsg" class="msg"></p>
+  </section>
+
+</div>
+<script src="assets/crypto.js"></script>
+<script>
+'use strict';
+const C = NovelCrypto;
+const $ = id => document.getElementById(id);
+const VIEWS = ['nameView', 'passView', 'listView', 'readView'];
+const IMAGE_SRC = /^data:image\/(png|jpeg|gif|webp|avif);base64,[A-Za-z0-9+/=]+$/;
+
+let viewerName = null;
+let manifestText = null;
+let manifest = null;
+let password = null; // 記事更新で鍵が変わった時に本棚を読み直すため、メモリ上にだけ保持
+let vertical = false;
+try { vertical = localStorage.getItem('novels.viewer.vertical') === '1'; } catch (e) {}
+
+function show(id) {
+  for (const v of VIEWS) $(v).classList.toggle('hidden', v !== id);
+  window.scrollTo(0, 0);
+}
+
+function setMsg(el, text, kind) {
+  el.textContent = text;
+  el.className = 'msg' + (kind ? ' ' + kind : '');
+}
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+async function fetchText(path) {
+  // GitHub Pages のキャッシュを避けるためクエリを付ける
+  const res = await fetch(path + '?t=' + Date.now(), { cache: 'no-store' });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.text();
+}
+
+async function start(name) {
+  viewerName = name;
+  manifest = null;
+  manifestText = null;
+  $('who').textContent = $('who2').textContent = name;
+  $('pass').value = '';
+  $('unlock').disabled = true;
+  show('passView');
+  setMsg($('passMsg'), '読み込んでいます…');
+  try {
+    manifestText = await fetchText('data/viewers/' + await C.viewerFileId(name) + '.enc');
+  } catch (err) {
+    setMsg($('passMsg'), 'データを読み込めませんでした（' + err.message + '）', 'error');
+    return;
+  }
+  if (manifestText === null) {
+    setMsg($('passMsg'), 'この名前は登録されていません。', 'error');
+    return;
+  }
+  setMsg($('passMsg'), '');
+  $('unlock').disabled = false;
+  $('pass').focus();
+}
+
+$('nameForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('nameInput').value.trim();
+  if (!name) return;
+  try { sessionStorage.setItem('novels.viewer.name', name); } catch (err) {}
+  start(name);
+});
+
+$('changeName').addEventListener('click', e => {
+  e.preventDefault();
+  try { sessionStorage.removeItem('novels.viewer.name'); } catch (err) {}
+  $('nameInput').value = viewerName || '';
+  show('nameView');
+  $('nameInput').focus();
+});
+
+$('passForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!manifestText) return;
+  $('unlock').disabled = true;
+  setMsg($('passMsg'), '復号しています…');
+  try {
+    manifest = await C.decryptWithPassword(manifestText, $('pass').value);
+  } catch (err) {
+    setMsg($('passMsg'), err.name === 'DecryptError' ? 'パスワードが違います。' : err.message, 'error');
+    $('unlock').disabled = false;
+    return;
+  }
+  password = $('pass').value;
+  $('pass').value = '';
+  setMsg($('passMsg'), '');
+  renderShelf();
+  show('listView');
+});
+
+function renderShelf() {
+  const ul = $('shelf');
+  ul.replaceChildren();
+  const items = Array.isArray(manifest.articles) ? manifest.articles : [];
+  if (!items.length) {
+    const li = document.createElement('li');
+    li.className = 'muted';
+    li.textContent = 'まだ記事がありません。';
+    ul.append(li);
+    return;
+  }
+  for (const item of items) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'shelf-item';
+    const t = document.createElement('div');
+    t.className = 'title-line';
+    t.textContent = item.title;
+    const d = document.createElement('div');
+    d.className = 'muted';
+    d.textContent = fmtDate(item.updatedAt);
+    btn.append(t, d);
+    btn.addEventListener('click', () => {
+      history.pushState({ read: item.id }, '');
+      openArticle(item);
+    });
+    li.append(btn);
+    ul.append(li);
+  }
+}
+
+function renderBody(container, body, images) {
+  container.replaceChildren();
+  const valid = (images || []).map(img => (img && IMAGE_SRC.test(img.data) ? img : null));
+  const used = new Set();
+  const figure = img => {
+    const f = document.createElement('figure');
+    const el = document.createElement('img');
+    el.src = img.data;
+    el.alt = '';
+    el.loading = 'lazy';
+    f.append(el);
+    return f;
+  };
+  const parts = String(body || '').split(/\[\[画像(\d+)\]\]/);
+  parts.forEach((part, i) => {
+    if (i % 2 === 0) {
+      if (part) container.append(document.createTextNode(part));
+      return;
+    }
+    const idx = Number(part) - 1;
+    if (valid[idx]) {
+      used.add(idx);
+      container.append(figure(valid[idx]));
+    }
+  });
+  valid.forEach((img, idx) => {
+    if (img && !used.has(idx)) container.append(figure(img));
+  });
+}
+
+async function openArticle(item) {
+  show('readView');
+  applyVertical();
+  $('aTitle').textContent = item.title;
+  $('aDate').textContent = fmtDate(item.updatedAt);
+  $('aBody').replaceChildren();
+  setMsg($('readMsg'), '読み込んでいます…');
+  try {
+    let a = await loadArticle(item);
+    if (!a) {
+      // 管理者が記事を更新すると鍵が変わるので、本棚を読み直してもう一度試す
+      const fresh = await reloadManifest();
+      const next = fresh && fresh.articles.find(x => x.id === item.id);
+      a = next ? await loadArticle(next) : null;
+    }
+    if (!a) throw new Error('記事を開けませんでした。更新直後の場合は数分待ってから開き直してください。');
+    $('aTitle').textContent = a.title;
+    renderBody($('aBody'), a.body, a.images);
+    setMsg($('readMsg'), '');
+  } catch (err) {
+    setMsg($('readMsg'), err.message, 'error');
+  }
+}
+
+// 記事が無い・鍵が合わない場合は null を返す
+async function loadArticle(item) {
+  const text = await fetchText('data/articles/' + item.id + '.enc');
+  if (text === null) return null;
+  try {
+    return await C.decryptWithKey(text, item.key);
+  } catch (err) {
+    if (err.name === 'DecryptError') return null;
+    throw err;
+  }
+}
+
+async function reloadManifest() {
+  const text = await fetchText('data/viewers/' + await C.viewerFileId(viewerName) + '.enc');
+  if (text === null) return null;
+  try {
+    manifest = await C.decryptWithPassword(text, password);
+  } catch (err) {
+    return null;
+  }
+  renderShelf();
+  return manifest;
+}
+
+$('back').addEventListener('click', () => history.back());
+
+window.addEventListener('popstate', () => {
+  if (manifest) show('listView');
+});
+
+function applyVertical() {
+  $('article').classList.toggle('vertical', vertical);
+  $('toggleVertical').textContent = vertical ? '横書き' : '縦書き';
+}
+
+$('toggleVertical').addEventListener('click', () => {
+  vertical = !vertical;
+  applyVertical();
+  try { localStorage.setItem('novels.viewer.vertical', vertical ? '1' : '0'); } catch (e) {}
+});
+
+let initialName = null;
+try { initialName = sessionStorage.getItem('novels.viewer.name'); } catch (e) {}
+if (initialName) {
+  start(initialName);
+} else {
+  show('nameView');
+  $('nameInput').focus();
+}
+</script>
+</body>
+</html>

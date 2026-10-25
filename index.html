@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Novels</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@500;600&display=swap">
+<link rel="stylesheet" href="assets/common.css">
+<style>
+  .hero { min-height: 100vh; min-height: 100svh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+  .gate { width: 100%; max-width: 360px; text-align: center; }
+  .gate h1 { font-size: 2rem; letter-spacing: .25em; margin: 0 0 8px; padding-left: .25em; }
+  .gate p { margin: 0 0 32px; }
+  .gate form { display: flex; gap: 8px; }
+  .gate input { flex: 1; min-width: 0; }
+</style>
+</head>
+<body>
+<main class="hero">
+  <div class="gate">
+    <h1>Novels</h1>
+    <p class="muted">お名前を入力してください</p>
+    <form id="gate">
+      <input id="name" type="text" autocomplete="username" placeholder="お名前" aria-label="お名前" required>
+      <button class="btn" type="submit">入る</button>
+    </form>
+  </div>
+</main>
+<script src="assets/crypto.js"></script>
+<script>
+  'use strict';
+  document.getElementById('gate').addEventListener('submit', e => {
+    e.preventDefault();
+    const raw = document.getElementById('name').value.trim();
+    const name = NovelCrypto.normalizeName(raw);
+    if (!name) return;
+
+    let adminName = null;
+    try { adminName = localStorage.getItem('novels.admin.name'); } catch (err) {}
+
+    // 管理者名は管理者のブラウザにだけ保存されているので、他の端末では閲覧者扱いになる
+    if (adminName && adminName === name) {
+      try { sessionStorage.setItem('novels.admin.handoff', raw); } catch (err) {}
+      location.href = 'admin.html';
+      return;
+    }
+    try { sessionStorage.setItem('novels.viewer.name', raw); } catch (err) {}
+    location.href = 'viewer.html';
+  });
+</script>
+</body>
+</html>
