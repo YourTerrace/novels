@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Novels 管理</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600&display=swap">
+<link rel="stylesheet" href="assets/common.css">
+<style>
+  .topbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 16px 0 20px; }
+  .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 10px 14px; font: inherit; color: var(--muted); cursor: pointer; }
+  .tabs button.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .section { margin-top: 20px; }
+  .pill { font-size: .75rem; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; overflow-wrap: anywhere; }
+  .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 8px; }
+  .thumb { border: 1px solid var(--line); border-radius: 8px; padding: 6px; font-size: .8rem; background: var(--bg); }
+  .thumb img { width: 100%; height: 90px; object-fit: cover; border-radius: 4px; display: block; }
+  .thumb .row { margin-top: 4px; gap: 4px; }
+  .checks { max-height: 260px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; background: var(--bg); }
+  .panel { flex-basis: 100%; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; }
+  .status { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 10; background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: .9rem; width: max-content; max-width: calc(100% - 32px); box-shadow: 0 4px 16px rgba(0,0,0,.2); }
+  .status.error { background: var(--danger); color: #fff; }
+  .status.ok { background: var(--ok); color: #fff; }
+  h2.sub { margin: 0; font-size: 1.15rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 初回設定 -->
+  <section id="setupView" class="hidden">
+    <h1>管理者の初回設定</h1>
+    <p class="muted">このブラウザに管理者情報を保存します。パスワード自体は保存せず、PAT はこのパスワードで暗号化して保存します。</p>
+    <form id="setupForm" class="card">
+      <label for="sName">管理者名</label>
+      <input id="sName" type="text" autocomplete="username" required>
+      <label for="sPass">管理者パスワード（10文字以上）</label>
+      <input id="sPass" type="password" autocomplete="new-password" minlength="10" required>
+      <label for="sPass2">管理者パスワード（確認）</label>
+      <input id="sPass2" type="password" autocomplete="new-password" required>
+      <label for="sOwner">GitHub ユーザー名</label>
+      <input id="sOwner" type="text" autocapitalize="off" required>
+      <label for="sRepo">リポジトリ名</label>
+      <input id="sRepo" type="text" autocapitalize="off" required>
+      <label for="sBranch">ブランチ（GitHub Pages の公開元）</label>
+      <input id="sBranch" type="text" autocapitalize="off" value="main" required>
+      <label for="sToken">PAT（Fine-grained token／対象リポジトリの Contents: Read and write）</label>
+      <input id="sToken" type="password" autocomplete="off" required>
+      <div class="row" style="margin-top:16px"><button class="btn" type="submit">設定して始める</button></div>
+      <p id="setupMsg" class="msg"></p>
+    </form>
+  </section>
+
+  <!-- ログイン -->
+  <section id="loginView" class="hidden">
+    <h1>管理者ログイン</h1>
+    <form id="loginForm" class="card">
+      <label for="lName">管理者名</label>
+      <input id="lName" type="text" autocomplete="username" required>
+      <label for="lPass">パスワード</label>
+      <input id="lPass" type="password" autocomplete="current-password" required>
+      <div class="row" style="margin-top:16px"><button class="btn" type="submit">ログイン</button></div>
+      <p id="loginMsg" class="msg"></p>
+    </form>
+    <p class="muted section"><a href="#" id="resetLocal">このブラウザの管理者情報を消して、初回設定からやり直す</a></p>
+  </section>
+
+  <!-- 管理画面 -->
+  <section id="mainView" class="hidden">
+    <div class="topbar">
+      <h1 style="margin:0">管理</h1>
+      <div class="row"><span id="repoLabel" class="pill"></span><button id="logout" class="btn ghost small" type="button">ログアウト</button></div>
+    </div>
+    <nav class="tabs">
+      <button type="button" data-tab="articles" class="active">記事</button>
+      <button type="button" data-tab="viewers">閲覧者</button>
+      <button type="button" data-tab="settings">設定</button>
+    </nav>
+
+    <div id="tab-articles">
+      <div id="articleListPane">
+        <div class="row" style="justify-content:space-between">
+          <h2 class="sub">記事一覧</h2>
+          <button id="newArticle" class="btn small" type="button">＋ 新規記事</button>
+        </div>
+        <ul id="articleList" class="list card section"></ul>
+      </div>
+
+      <form id="editor" class="card hidden">
+        <h2 id="editorHeading" class="sub">新規記事</h2>
+        <label for="eTitle">タイトル</label>
+        <input id="eTitle" type="text" required>
+        <label for="eBody">本文</label>
+        <textarea id="eBody"></textarea>
+        <label for="eImages">画像 <span class="muted">— 本文に [[画像1]] と書くとその位置に表示。書かなかった画像は末尾に表示</span></label>
+        <input id="eImages" type="file" accept="image/*" multiple>
+        <div id="thumbs" class="thumbs"></div>
+        <label>この記事を見せる閲覧者</label>
+        <div id="eViewers" class="checks"></div>
+        <p id="eSize" class="muted"></p>
+        <div class="row" style="margin-top:16px">
+          <button class="btn" type="submit">暗号化して保存</button>
+          <button id="cancelEdit" class="btn ghost" type="button">キャンセル</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="tab-viewers" class="hidden">
+      <form id="addViewer" class="card">
+        <h2 class="sub">閲覧者を追加</h2>
+        <label for="vName">閲覧者名</label>
+        <input id="vName" type="text" autocomplete="off" required>
+        <label for="vPass">閲覧者パスワード（8文字以上）</label>
+        <input id="vPass" type="password" autocomplete="new-password" minlength="8" required>
+        <label for="vPass2">閲覧者パスワード（確認）</label>
+        <input id="vPass2" type="password" autocomplete="new-password" required>
+        <div class="row" style="margin-top:16px"><button class="btn" type="submit">追加</button></div>
+      </form>
+      <ul id="viewerList" class="list card section"></ul>
+    </div>
+
+    <div id="tab-settings" class="hidden">
+      <form id="repoForm" class="card">
+        <h2 class="sub">保存先</h2>
+        <label for="rOwner">GitHub ユーザー名</label>
+        <input id="rOwner" type="text" autocapitalize="off" required>
+        <label for="rRepo">リポジトリ名</label>
+        <input id="rRepo" type="text" autocapitalize="off" required>
+        <label for="rBranch">ブランチ</label>
+        <input id="rBranch" type="text" autocapitalize="off" required>
+        <label for="rToken">新しい PAT（変更しない場合は空欄）</label>
+        <input id="rToken" type="password" autocomplete="off">
+        <div class="row" style="margin-top:16px"><button class="btn" type="submit">保存</button></div>
+      </form>
+
+      <form id="adminPassForm" class="card section">
+        <h2 class="sub">管理者パスワードの変更</h2>
+        <label for="pNew">新しいパスワード（10文字以上）</label>
+        <input id="pNew" type="password" autocomplete="new-password" minlength="10" required>
+        <label for="pNew2">新しいパスワード（確認）</label>
+        <input id="pNew2" type="password" autocomplete="new-password" required>
+        <div class="row" style="margin-top:16px"><button class="btn" type="submit">変更</button></div>
+      </form>
+
+      <div class="card section">
+        <h2 class="sub">このブラウザ</h2>
+        <p class="muted">保存した内容が公開ページに反映されるまで、数分かかることがあります。</p>
+        <button id="forget" class="btn danger" type="button">このブラウザの管理者情報を消す</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+<div id="status" class="status hidden" role="status" aria-live="polite"></div>
+
+<script src="assets/crypto.js"></script>
+<script>
+'use strict';
+const C = NovelCrypto;
+const $ = id => document.getElementById(id);
+
+const LS_NAME = 'novels.admin.name';
+const LS_TOKEN = 'novels.admin.token';
+const LS_REPO = 'novels.admin.repo';
+const ADMIN_PATH = 'data/admin.enc';
+const viewerPath = id => `data/viewers/${id}.enc`;
+const articlePath = id => `data/articles/${id}.enc`;
+// コミットメッセージにタイトルや名前を書くと公開されてしまうので固定文にする
+const COMMIT_MESSAGE = 'Update encrypted data';
+const MAX_IMAGE_SIDE = 1600;
+
+let session = null; // { password, token, repo, gh }
+let db = null;      // 管理データ（data/admin.enc の中身）
+let editor = null;  // 編集中の記事 { id, images, snapshot }
+let busy = false;
+
+/* ---------- 小物 ---------- */
+
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+function el(tag, props, ...children) {
+  const node = document.createElement(tag);
+  Object.assign(node, props || {});
+  for (const c of children) node.append(c);
+  return node;
+}
+
+function showView(id) {
+  for (const v of ['setupView', 'loginView', 'mainView']) $(v).classList.toggle('hidden', v !== id);
+}
+
+function setMsg(node, text, kind) {
+  node.textContent = text;
+  node.className = 'msg' + (kind ? ' ' + kind : '');
+}
+
+let statusTimer = null;
+function status(text, kind, sticky) {
+  const s = $('status');
+  s.textContent = text;
+  s.className = 'status' + (kind ? ' ' + kind : '');
+  clearTimeout(statusTimer);
+  if (!sticky) statusTimer = setTimeout(() => s.classList.add('hidden'), kind === 'error' ? 8000 : 3500);
+}
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtSize(bytes) {
+  return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : Math.ceil(bytes / 1024) + ' KB';
+}
+
+function submitButton(form) {
+  return form.querySelector('button[type=submit]');
+}
+
+/* ---------- GitHub API ---------- */
+
+async function apiError(res) {
+  let detail = '';
+  try { detail = (await res.json()).message || ''; } catch (e) {}
+  const known = {
+    401: 'PAT が無効か、期限切れです',
+    403: 'PAT にこの操作の権限がありません',
+    404: 'リポジトリかブランチが見つかりません（PAT の対象リポジトリも確認してください）',
+    409: 'リポジトリが空か、更新が競合しました',
+    422: 'GitHub が更新を受け付けませんでした。ページを再読み込みしてやり直してください',
+  };
+  return new Error((known[res.status] || 'GitHub API エラー') + `（HTTP ${res.status}${detail ? ': ' + detail : ''}）`);
+}
+
+class GitHub {
+  constructor(token, repo) {
+    this.token = token;
+    this.repo = repo;
+    this.base = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}`;
+    this.branchPath = repo.branch.split('/').map(encodeURIComponent).join('/');
+  }
+
+  request(method, path, body, accept) {
+    const headers = {
+      Authorization: 'Bearer ' + this.token,
+      Accept: accept || 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    };
+    if (body) headers['Content-Type'] = 'application/json';
+    return fetch('https://api.github.com' + path, {
+      method, headers, cache: 'no-store', body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  async json(method, path, body) {
+    const res = await this.request(method, path, body);
+    if (!res.ok) throw await apiError(res);
+    return res.json();
+  }
+
+  // 接続確認: リポジトリとブランチが存在し、PAT で読めること
+  async check() {
+    await this.json('GET', this.base);
+    await this.json('GET', `${this.base}/git/ref/heads/${this.branchPath}`);
+  }
+
+  // ファイルを読む。無ければ null
+  async readText(path) {
+    const p = path.split('/').map(encodeURIComponent).join('/');
+    const res = await this.request('GET', `${this.base}/contents/${p}?ref=${encodeURIComponent(this.repo.branch)}`, null, 'application/vnd.github.raw+json');
+    if (res.status === 404) return null;
+    if (!res.ok) throw await apiError(res);
+    return res.text();
+  }
+
+  // 複数ファイルの追加・更新・削除を 1 コミットで行う（content が null なら削除）
+  async commit(files, message) {
+    const ref = await this.json('GET', `${this.base}/git/ref/heads/${this.branchPath}`);
+    const parent = await this.json('GET', `${this.base}/git/commits/${ref.object.sha}`);
+    const tree = [];
+    for (const f of files) {
+      if (f.content === null) {
+        tree.push({ path: f.path, mode: '100644', type: 'blob', sha: null });
+      } else {
+        const blob = await this.json('POST', `${this.base}/git/blobs`, { content: f.content, encoding: 'utf-8' });
+        tree.push({ path: f.path, mode: '100644', type: 'blob', sha: blob.sha });
+      }
+    }
+    const newTree = await this.json('POST', `${this.base}/git/trees`, { base_tree: parent.tree.sha, tree });
+    const commit = await this.json('POST', `${this.base}/git/commits`, { message, tree: newTree.sha, parents: [ref.object.sha] });
+    await this.json('PATCH', `${this.base}/git/refs/heads/${this.branchPath}`, { sha: commit.sha });
+  }
+}
+
+/* ---------- データの読み書き ---------- */
+
+function emptyDb() {
+  return { v: 1, salt: C.newSalt(), viewers: [], articles: [] };
+}
+
+async function loadDb(gh, password) {
+  const text = await gh.readText(ADMIN_PATH);
+  if (text === null) return emptyDb();
+  try {
+    return await C.decryptWithPassword(text, password);
+  } catch (err) {
+    if (err.name === 'DecryptError') {
+      throw new Error('リポジトリ上の管理データ（data/admin.enc）をこのパスワードで開けませんでした。以前に使った管理者パスワードを入力してください。');
+    }
+    throw err;
+  }
+}
+
+function manifestFor(v) {
+  const articles = v.articles
+    .map(id => db.articles.find(a => a.id === id))
+    .filter(Boolean)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map(a => ({ id: a.id, title: a.title, key: a.key, createdAt: a.createdAt, updatedAt: a.updatedAt }));
+  return { v: 1, name: v.name, articles };
+}
+
+// plan: { put: [{path, content}], del: [path], viewers: [viewerId] }
+// 指定された閲覧者の本棚ファイルと管理データを作り直し、まとめて 1 コミットで保存する
+async function commitPlan(plan) {
+  const files = [...(plan.put || [])];
+  for (const id of new Set(plan.viewers || [])) {
+    const v = db.viewers.find(x => x.id === id);
+    if (v) files.push({ path: viewerPath(v.id), content: await C.encryptWithPassword(manifestFor(v), v.password, v.salt) });
+  }
+  for (const p of plan.del || []) files.push({ path: p, content: null });
+  files.push({ path: ADMIN_PATH, content: await C.encryptWithPassword(db, session.password, db.salt) });
+  await session.gh.commit(files, COMMIT_MESSAGE);
+}
+
+// db を書き換えて保存する。失敗したら db を元に戻す
+async function mutate(work) {
+  if (busy) {
+    status('前の処理が終わるまでお待ちください', 'error');
+    return false;
+  }
+  busy = true;
+  setBusy(true);
+  const backup = structuredClone(db);
+  try {
+    status('暗号化しています…', null, true);
+    const plan = await work();
+    status('GitHub に保存しています…', null, true);
+    await commitPlan(plan);
+    status('保存しました（公開ページへの反映には数分かかることがあります）', 'ok');
+    return true;
+  } catch (err) {
+    db = backup;
+    console.error(err);
+    status(err.message, 'error');
+    return false;
+  } finally {
+    busy = false;
+    setBusy(false);
+    renderAll();
+  }
+}
+
+function setBusy(on) {
+  document.querySelectorAll('#mainView button').forEach(b => { b.disabled = on; });
+}
+
+/* ---------- 初回設定・ログイン ---------- */
+
+function guessRepo() {
+  const host = location.hostname;
+  if (!host.endsWith('.github.io')) return { owner: '', repo: '' };
+  const owner = host.slice(0, -'.github.io'.length);
+  const first = location.pathname.split('/').filter(Boolean)[0];
+  return { owner, repo: first && !first.endsWith('.html') ? first : host };
+}
+
+function startSession(s, loaded) {
+  session = s;
+  db = loaded;
+  $('repoLabel').textContent = `${s.repo.owner}/${s.repo.repo}（${s.repo.branch}）`;
+  $('rOwner').value = s.repo.owner;
+  $('rRepo').value = s.repo.repo;
+  $('rBranch').value = s.repo.branch;
+  showView('mainView');
+  renderAll();
+}
+
+$('setupForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = $('setupMsg');
+  const name = C.normalizeName($('sName').value);
+  const password = $('sPass').value;
+  const token = $('sToken').value.trim();
+  const repo = { owner: $('sOwner').value.trim(), repo: $('sRepo').value.trim(), branch: $('sBranch').value.trim() || 'main' };
+  if (!name) return setMsg(msg, '管理者名を入力してください', 'error');
+  if (password.length < 10) return setMsg(msg, 'パスワードは10文字以上にしてください', 'error');
+  if (password !== $('sPass2').value) return setMsg(msg, '確認用のパスワードが一致しません', 'error');
+
+  const btn = submitButton(e.target);
+  btn.disabled = true;
+  try {
+    setMsg(msg, 'GitHub に接続しています…');
+    const gh = new GitHub(token, repo);
+    await gh.check();
+    setMsg(msg, '既存のデータを確認しています…');
+    const loaded = await loadDb(gh, password);
+    const tokenBlob = await C.encryptWithPassword({ token }, password);
+    if (!(lsSet(LS_NAME, name) && lsSet(LS_REPO, JSON.stringify(repo)) && lsSet(LS_TOKEN, tokenBlob))) {
+      throw new Error('このブラウザに保存できませんでした（プライベートモードでは保存できない場合があります）');
+    }
+    $('sPass').value = $('sPass2').value = $('sToken').value = '';
+    setMsg(msg, '');
+    startSession({ password, token, repo, gh }, loaded);
+  } catch (err) {
+    setMsg(msg, err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = $('loginMsg');
+  const password = $('lPass').value;
+  const btn = submitButton(e.target);
+  btn.disabled = true;
+  try {
+    setMsg(msg, '確認しています…');
+    let saved;
+    try {
+      if (C.normalizeName($('lName').value) !== lsGet(LS_NAME)) throw new C.DecryptError();
+      saved = await C.decryptWithPassword(lsGet(LS_TOKEN), password);
+    } catch (err) {
+      if (err.name === 'DecryptError') throw new Error('管理者名またはパスワードが違います');
+      throw err;
+    }
+    const repo = JSON.parse(lsGet(LS_REPO));
+    const gh = new GitHub(saved.token, repo);
+    setMsg(msg, 'データを読み込んでいます…');
+    const loaded = await loadDb(gh, password);
+    $('lPass').value = '';
+    setMsg(msg, '');
+    startSession({ password, token: saved.token, repo, gh }, loaded);
+  } catch (err) {
+    setMsg(msg, err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function forgetLocal() {
+  if (!confirm('このブラウザに保存した管理者情報（管理者名・暗号化した PAT・保存先）を消します。GitHub 上のデータは消えません。よろしいですか？')) return;
+  lsDel(LS_NAME);
+  lsDel(LS_TOKEN);
+  lsDel(LS_REPO);
+  location.reload();
+}
+
+$('resetLocal').addEventListener('click', e => { e.preventDefault(); forgetLocal(); });
+$('forget').addEventListener('click', forgetLocal);
+$('logout').addEventListener('click', () => location.reload());
+
+document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('active', x === b));
+  for (const t of ['articles', 'viewers', 'settings']) $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab);
+}));
+
+/* ---------- 記事 ---------- */
+
+function renderAll() {
+  if (!db) return;
+  renderArticles();
+  renderViewers();
+}
+
+function viewersOf(articleId) {
+  return db.viewers.filter(v => v.articles.includes(articleId));
+}
+
+function renderArticles() {
+  const ul = $('articleList');
+  ul.replaceChildren();
+  if (!db.articles.length) {
+    ul.append(el('li', { className: 'muted', textContent: 'まだ記事がありません。' }));
+    return;
+  }
+  for (const a of [...db.articles].sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))) {
+    const names = viewersOf(a.id).map(v => v.name);
+    ul.append(el('li', {},
+      el('div', { className: 'grow' },
+        el('div', { className: 'title-line', textContent: a.title }),
+        el('div', { className: 'muted', textContent: `${fmtDate(a.updatedAt)} ・ ${names.length ? names.join('、') : '閲覧者なし'}` })),
+      el('div', { className: 'row' },
+        el('button', { type: 'button', className: 'btn ghost small', textContent: '編集', onclick: () => editArticle(a) }),
+        el('button', { type: 'button', className: 'btn danger small', textContent: '削除', onclick: () => deleteArticle(a) }))));
+  }
+}
+
+function editorSnapshot() {
+  return JSON.stringify([$('eTitle').value, $('eBody').value, editor.images.length]);
+}
+
+function openEditor(article, content) {
+  editor = { id: article ? article.id : null, images: content ? (content.images || []).slice() : [] };
+  $('editorHeading').textContent = article ? '記事を編集' : '新規記事';
+  $('eTitle').value = content ? content.title : '';
+  $('eBody').value = content ? content.body : '';
+  $('eImages').value = '';
+  renderViewerChecks(article);
+  renderThumbs();
+  editor.snapshot = editorSnapshot();
+  $('articleListPane').classList.add('hidden');
+  $('editor').classList.remove('hidden');
+  window.scrollTo(0, 0);
+  $('eTitle').focus();
+}
+
+function closeEditor() {
+  editor = null;
+  $('editor').classList.add('hidden');
+  $('articleListPane').classList.remove('hidden');
+}
+
+async function editArticle(a) {
+  if (busy) return;
+  status('記事を読み込んでいます…', null, true);
+  try {
+    const text = await session.gh.readText(articlePath(a.id));
+    if (text === null) throw new Error('記事ファイルが見つかりません');
+    const content = await C.decryptWithKey(text, a.key);
+    $('status').classList.add('hidden');
+    openEditor(a, content);
+  } catch (err) {
+    status(err.name === 'DecryptError' ? '記事を復号できませんでした' : err.message, 'error');
+  }
+}
+
+function renderViewerChecks(article) {
+  const box = $('eViewers');
+  box.replaceChildren();
+  if (!db.viewers.length) {
+    box.append(el('p', { className: 'muted', textContent: '閲覧者がいません。「閲覧者」タブで追加してください。' }));
+    return;
+  }
+  for (const v of db.viewers) {
+    const cb = el('input', { type: 'checkbox', value: v.id, checked: !!article && v.articles.includes(article.id) });
+    box.append(el('label', { className: 'check' }, cb, v.name));
+  }
+}
+
+function insertAtCursor(textarea, text) {
+  textarea.focus();
+  textarea.setRangeText(text, textarea.selectionStart, textarea.selectionEnd, 'end');
+  updateSize();
+}
+
+function removeImage(index) {
+  if (!confirm(`画像${index + 1} を削除しますか？（本文中の [[画像${index + 1}]] も消え、後ろの番号は詰められます）`)) return;
+  editor.images.splice(index, 1);
+  $('eBody').value = $('eBody').value.replace(/\[\[画像(\d+)\]\]/g, (m, n) => {
+    n = Number(n);
+    if (n === index + 1) return '';
+    return n > index + 1 ? `[[画像${n - 1}]]` : m;
+  });
+  renderThumbs();
+}
+
+function renderThumbs() {
+  const box = $('thumbs');
+  box.replaceChildren();
+  editor.images.forEach((img, i) => {
+    const marker = `[[画像${i + 1}]]`;
+    box.append(el('div', { className: 'thumb' },
+      el('img', { src: img.data, alt: '' }),
+      el('div', { textContent: marker }),
+      el('div', { className: 'row' },
+        el('button', { type: 'button', className: 'btn ghost small', textContent: '挿入', onclick: () => insertAtCursor($('eBody'), marker) }),
+        el('button', { type: 'button', className: 'btn danger small', textContent: '削除', onclick: () => removeImage(i) }))));
+  });
+  updateSize();
+}
+
+function updateSize() {
+  if (!editor) return;
+  const plain = ($('eTitle').value.length + $('eBody').value.length) * 3 + editor.images.reduce((n, img) => n + img.data.length, 0);
+  const estimate = plain * 4 / 3;
+  $('eSize').textContent = `暗号化後のおおよそのサイズ: ${fmtSize(estimate)}` + (estimate > 50 * 1048576 ? '（大きすぎます。画像を減らしてください）' : '');
+}
+
+function readDataURL(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+// 大きな画像は長辺 1600px に縮小する（GIF はアニメーションを保つためそのまま）
+async function loadImage(file) {
+  const data = await readDataURL(file);
+  if (file.type === 'image/gif') return { name: file.name, type: file.type, data };
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error('画像を読み込めませんでした: ' + file.name));
+    i.src = data;
+  });
+  const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+  const keep = ['image/png', 'image/jpeg', 'image/webp'].includes(file.type);
+  if (keep && scale === 1 && file.size <= 1048576) return { name: file.name, type: file.type, data };
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  const type = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+  return { name: file.name, type, data: canvas.toDataURL(type, 0.85) };
+}
+
+$('eImages').addEventListener('change', async e => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  for (const f of files) {
+    try {
+      editor.images.push(await loadImage(f));
+    } catch (err) {
+      status(err.message, 'error');
+    }
+  }
+  renderThumbs();
+});
+
+$('eTitle').addEventListener('input', updateSize);
+$('eBody').addEventListener('input', updateSize);
+
+$('newArticle').addEventListener('click', () => openEditor(null, null));
+
+$('cancelEdit').addEventListener('click', () => {
+  if (editorSnapshot() !== editor.snapshot && !confirm('編集内容を破棄しますか？')) return;
+  closeEditor();
+});
+
+$('editor').addEventListener('submit', async e => {
+  e.preventDefault();
+  const title = $('eTitle').value.trim();
+  if (!title) return status('タイトルを入力してください', 'error');
+  const body = $('eBody').value;
+  const images = editor.images.slice();
+  const selected = new Set([...$('eViewers').querySelectorAll('input:checked')].map(i => i.value));
+  const id = editor.id;
+
+  const ok = await mutate(async () => {
+    const now = new Date().toISOString();
+    let a = id && db.articles.find(x => x.id === id);
+    if (!a) {
+      a = { id: C.randomHex(8), createdAt: now };
+      db.articles.push(a);
+    }
+    a.title = title;
+    a.updatedAt = now;
+    // 保存のたびに鍵を作り直す。閲覧者から外された人は、以後の内容を復号できない
+    a.key = C.newKey();
+    const affected = [];
+    for (const v of db.viewers) {
+      const had = v.articles.includes(a.id);
+      const want = selected.has(v.id);
+      if (want && !had) v.articles.push(a.id);
+      if (!want && had) v.articles = v.articles.filter(x => x !== a.id);
+      if (had || want) affected.push(v.id);
+    }
+    const content = await C.encryptWithKey({ title, body, images, createdAt: a.createdAt, updatedAt: now }, a.key);
+    return { put: [{ path: articlePath(a.id), content }], viewers: affected };
+  });
+  if (ok) closeEditor();
+});
+
+async function deleteArticle(a) {
+  if (!confirm(`「${a.title}」を削除しますか？`)) return;
+  await mutate(async () => {
+    const affected = viewersOf(a.id).map(v => v.id);
+    db.articles = db.articles.filter(x => x.id !== a.id);
+    for (const v of db.viewers) v.articles = v.articles.filter(x => x !== a.id);
+    return { del: [articlePath(a.id)], viewers: affected };
+  });
+}
+
+/* ---------- 閲覧者 ---------- */
+
+let openPanelId = null;
+
+function renderViewers() {
+  const ul = $('viewerList');
+  ul.replaceChildren();
+  if (!db.viewers.length) {
+    ul.append(el('li', { className: 'muted', textContent: 'まだ閲覧者がいません。' }));
+    return;
+  }
+  for (const v of [...db.viewers].sort((x, y) => x.name.localeCompare(y.name, 'ja'))) {
+    const li = el('li', {},
+      el('div', { className: 'grow' },
+        el('div', { className: 'title-line', textContent: v.name }),
+        el('div', { className: 'muted', textContent: `表示する記事 ${v.articles.length} 件` })),
+      el('div', { className: 'row' },
+        el('button', { type: 'button', className: 'btn ghost small', textContent: '表示記事', onclick: () => togglePanel(v, 'articles') }),
+        el('button', { type: 'button', className: 'btn ghost small', textContent: 'パスワード', onclick: () => togglePanel(v, 'password') }),
+        el('button', { type: 'button', className: 'btn danger small', textContent: '削除', onclick: () => deleteViewer(v) })));
+    if (openPanelId === v.id + ':articles') li.append(articlesPanel(v));
+    if (openPanelId === v.id + ':password') li.append(passwordPanel(v));
+    ul.append(li);
+  }
+}
+
+function togglePanel(v, kind) {
+  const id = v.id + ':' + kind;
+  openPanelId = openPanelId === id ? null : id;
+  renderViewers();
+}
+
+function articlesPanel(v) {
+  const box = el('div', { className: 'checks' });
+  if (!db.articles.length) box.append(el('p', { className: 'muted', textContent: '記事がありません。' }));
+  for (const a of [...db.articles].sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))) {
+    const cb = el('input', { type: 'checkbox', value: a.id, checked: v.articles.includes(a.id) });
+    box.append(el('label', { className: 'check' }, cb, a.title));
+  }
+  const save = async () => {
+    const selected = [...box.querySelectorAll('input:checked')].map(i => i.value);
+    const ok = await mutate(async () => {
+      db.viewers.find(x => x.id === v.id).articles = selected;
+      return { viewers: [v.id] };
+    });
+    if (ok) { openPanelId = null; renderViewers(); }
+  };
+  return el('div', { className: 'panel' },
+    el('div', { className: 'muted', textContent: `${v.name} さんに見せる記事` }),
+    box,
+    el('div', { className: 'row', style: 'margin-top:12px' },
+      el('button', { type: 'button', className: 'btn small', textContent: '保存', onclick: save }),
+      el('button', { type: 'button', className: 'btn ghost small', textContent: '閉じる', onclick: () => togglePanel(v, 'articles') })));
+}
+
+function passwordPanel(v) {
+  const p1 = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '新しいパスワード（8文字以上）' });
+  const p2 = el('input', { type: 'password', autocomplete: 'new-password', placeholder: '確認' });
+  const save = async () => {
+    if (p1.value.length < 8) return status('パスワードは8文字以上にしてください', 'error');
+    if (p1.value !== p2.value) return status('確認用のパスワードが一致しません', 'error');
+    const password = p1.value;
+    const ok = await mutate(async () => {
+      const target = db.viewers.find(x => x.id === v.id);
+      target.password = password;
+      target.salt = C.newSalt();
+      return { viewers: [v.id] };
+    });
+    if (ok) { openPanelId = null; renderViewers(); }
+  };
+  return el('div', { className: 'panel' },
+    el('div', { className: 'muted', textContent: `${v.name} さんの現在のパスワード: ${v.password}` }),
+    el('div', { style: 'display:grid;gap:8px;margin-top:8px' }, p1, p2),
+    el('div', { className: 'row', style: 'margin-top:12px' },
+      el('button', { type: 'button', className: 'btn small', textContent: '変更', onclick: save }),
+      el('button', { type: 'button', className: 'btn ghost small', textContent: '閉じる', onclick: () => togglePanel(v, 'password') })));
+}
+
+$('addViewer').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = $('vName').value.trim();
+  const password = $('vPass').value;
+  if (!C.normalizeName(name)) return status('閲覧者名を入力してください', 'error');
+  if (C.normalizeName(name) === lsGet(LS_NAME)) return status('管理者名と同じ名前は使えません', 'error');
+  if (password.length < 8) return status('パスワードは8文字以上にしてください', 'error');
+  if (password !== $('vPass2').value) return status('確認用のパスワードが一致しません', 'error');
+  const id = await C.viewerFileId(name);
+  if (db.viewers.some(v => v.id === id)) return status('同じ名前の閲覧者がすでにいます', 'error');
+
+  const ok = await mutate(async () => {
+    db.viewers.push({ id, name, password, salt: C.newSalt(), articles: [] });
+    return { viewers: [id] };
+  });
+  if (ok) e.target.reset();
+});
+
+async function deleteViewer(v) {
+  if (!confirm(`閲覧者「${v.name}」を削除しますか？`)) return;
+  await mutate(async () => {
+    db.viewers = db.viewers.filter(x => x.id !== v.id);
+    return { del: [viewerPath(v.id)] };
+  });
+}
+
+/* ---------- 設定 ---------- */
+
+$('repoForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (busy) return;
+  const repo = { owner: $('rOwner').value.trim(), repo: $('rRepo').value.trim(), branch: $('rBranch').value.trim() };
+  const token = $('rToken').value.trim() || session.token;
+  const btn = submitButton(e.target);
+  btn.disabled = true;
+  try {
+    status('GitHub に接続しています…', null, true);
+    const gh = new GitHub(token, repo);
+    await gh.check();
+    const loaded = await loadDb(gh, session.password);
+    const tokenBlob = await C.encryptWithPassword({ token }, session.password);
+    if (!(lsSet(LS_REPO, JSON.stringify(repo)) && lsSet(LS_TOKEN, tokenBlob))) throw new Error('このブラウザに保存できませんでした');
+    $('rToken').value = '';
+    startSession({ password: session.password, token, repo, gh }, loaded);
+    status('保存先を更新しました', 'ok');
+  } catch (err) {
+    status(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('adminPassForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const next = $('pNew').value;
+  if (next.length < 10) return status('パスワードは10文字以上にしてください', 'error');
+  if (next !== $('pNew2').value) return status('確認用のパスワードが一致しません', 'error');
+  // 保存完了の表示直後に閉じられても困らないよう、PAT の再暗号化は先に済ませておく
+  const tokenBlob = await C.encryptWithPassword({ token: session.token }, next);
+  const previous = session.password;
+  session.password = next;
+  const ok = await mutate(async () => {
+    db.salt = C.newSalt();
+    return {};
+  });
+  if (!ok) {
+    session.password = previous;
+    return;
+  }
+  if (!lsSet(LS_TOKEN, tokenBlob)) status('このブラウザへの保存に失敗しました。設定画面で PAT を入れ直してください', 'error');
+  e.target.reset();
+});
+
+/* ---------- 起動 ---------- */
+
+if (lsGet(LS_NAME) && lsGet(LS_TOKEN) && lsGet(LS_REPO)) {
+  showView('loginView');
+  let handoff = null;
+  try {
+    handoff = sessionStorage.getItem('novels.admin.handoff');
+    sessionStorage.removeItem('novels.admin.handoff');
+  } catch (e) {}
+  if (handoff) {
+    $('lName').value = handoff;
+    $('lPass').focus();
+  } else {
+    $('lName').focus();
+  }
+} else {
+  const g = guessRepo();
+  $('sOwner').value = g.owner;
+  $('sRepo').value = g.repo;
+  showView('setupView');
+}
+</script>
+</body>
+</html>
